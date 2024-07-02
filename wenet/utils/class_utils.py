@@ -41,6 +41,7 @@ WENET_ACTIVATION_CLASSES = {
     "selu": torch.nn.SELU,
     "swish": getattr(torch.nn, "SiLU", Swish),
     "gelu": torch.nn.GELU,
+    "elu": torch.nn.ELU,
 }
 
 WENET_RNN_CLASSES = {
