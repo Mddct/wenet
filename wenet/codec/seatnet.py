@@ -226,12 +226,60 @@ class EncoderBlock(torch.nn.Module):
             compress_channels,
             hidden,
             2 * stride,
+            stride,
         )
 
     def forward(self, input: torch.Tensor,
                 cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
         # TODO(Mddct): fix this cache later
         x = input
+        for layer in self.blocks:
+            x = layer(x, cache)
+        x = x.transpose(1, 2)
+        x = self.activation(self.norm(x))
+        x = x.transpose(1, 2)
+        return x
+
+
+class DecoderBlock(torch.nn.Module):
+
+    def __init__(
+        self,
+        in_channels: int,
+        residual_kernel_width: int = 3,
+        stride: int = 2,
+        num_residual_layers=3,
+        activation: str = 'elu',
+        activation_params: dict = {},
+        norm_eps: float = 1e-6,
+    ) -> None:
+        super().__init__()
+        self.residual_kernel_width = residual_kernel_width
+        self.stride = stride
+        self.num_residual_layers = num_residual_layers
+        self.first_convT = SConvTransposed1d(in_channels,
+                                             in_channels,
+                                             2 * stride,
+                                             stride=stride)
+        compress_channels = in_channels // 2
+        self.blocks = torch.nn.ModuleList([
+            SResidualUnit(in_channels if idx == 0 else compress_channels,
+                          compress_channels,
+                          kernel_sizes=[residual_kernel_width, 1],
+                          dilations=[residual_kernel_width**idx, 1],
+                          activation_type=activation,
+                          activation_params=activation_params,
+                          shortcut=(idx != 0))
+            for idx in range(self.num_residual_layers)
+        ])
+        self.norm = torch.nn.LayerNorm(compress_channels, eps=norm_eps)
+        self.activation = WENET_ACTIVATION_CLASSES[activation](
+            activation_params)
+
+    def forward(self, input: torch.Tensor,
+                cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
+        # TODO(Mddct): fix this cache later
+        x = self.first_convT(input)
         for layer in self.blocks:
             x = layer(x, None)
         x = x.transpose(1, 2)
