@@ -1,7 +1,6 @@
 import math
 from typing import Dict, List, Optional, Tuple, Union
 import torch
-from absl import logging
 
 from wenet.utils.class_utils import WENET_ACTIVATION_CLASSES
 
@@ -41,6 +40,16 @@ def pad1d(x: torch.Tensor,
         return torch.nn.functional.pad(x, paddings, mode, value)
 
 
+def unpad1d(x: torch.Tensor, paddings: Tuple[int, int]):
+    """Remove padding from x, handling properly zero padding. Only for 1d!"""
+    padding_left, padding_right = paddings
+    assert padding_left >= 0 and padding_right >= 0, (padding_left,
+                                                      padding_right)
+    assert (padding_left + padding_right) <= x.shape[-1]
+    end = x.shape[-1] - padding_right
+    return x[..., padding_left:end]
+
+
 class SConv1d(torch.nn.Module):
     """ Streaming conv1d eg: causal
     """
@@ -53,7 +62,7 @@ class SConv1d(torch.nn.Module):
                  dilation: int = 1,
                  groups: int = 1,
                  bias: bool = True,
-                 pad_mode: str = 'reflect') -> None:
+                 pad_mode: str = 'zeros') -> None:
         super().__init__()
         self.conv = torch.nn.Conv1d(in_channels,
                                     out_channels,
@@ -69,7 +78,7 @@ class SConv1d(torch.nn.Module):
         self.dilation = dilation
 
     def forward(self, input: torch.Tensor,
-                cache: Union[Dict[str, torch.Tensor], None]):
+                cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
         """
         Args:
             input: shape (B, channel, T)
@@ -89,6 +98,41 @@ class SConv1d(torch.nn.Module):
             cache['conv'].copy_(input[:, self.stride:, ])
             output = self.conv(input)
             return output
+
+
+class SConvTransposed1d(torch.nn.Module):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: int,
+                 stride: int = 1,
+                 groups: int = 1,
+                 bias: bool = True,
+                 pad_mode: str = 'zeros') -> None:
+        super().__init__()
+        self.convT = torch.nn.ConvTranspose1d(in_channels,
+                                              out_channels,
+                                              kernel_size,
+                                              stride,
+                                              groups=groups,
+                                              bias=bias)
+        self.pad_mode = pad_mode
+        self.kernel_size = kernel_size
+        self.stride = stride
+
+    def forward(self, input: torch.Tensor,
+                cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
+        padding_total = self.kernel_size - self.stride
+        if cache is None:
+            x = self.convT(input)
+            padding_left = 0
+            padding_right = padding_total
+            x = unpad1d(x, (padding_left, padding_right))
+            return x
+
+        else:
+            raise NotImplementedError('cache is not supported for now')
 
 
 class SResidualUnit(torch.nn.Module):
@@ -203,6 +247,7 @@ class SeaEncoder(torch.nn.Module):
         hidden: int,
         bottle_hidden: int,
         ratios: List[int],
+        num_residual_layers=3,
         kernel_size: int = 7,
         bottle_kernel_size: int = 3,
     ) -> None:
@@ -226,6 +271,7 @@ class SeaEncoder(torch.nn.Module):
                 EncoderBlock(
                     in_channels=in_channels,
                     hidden=out_channels,
+                    num_residual_layers=num_residual_layers,
                     stride=ratio,
                     activation='swish',
                 ))
@@ -248,8 +294,13 @@ class SeaEncoder(torch.nn.Module):
         x = self.act(self.norm0(x.transpose(1, 2)))
         x = x.transpose(1, 2)
 
-        # #TODO: fix cache
-        for i, layer in enumerate(self.encoders):
+        # TODO: fix cache
+        for _, layer in enumerate(self.encoders):
             x = layer(x, None)
         x = self.bottleneck(x, None)
         return x
+
+
+if __name__ == '__main__':
+    encoder = SeaEncoder(128, 128, [2, 4, 5, 8])
+    print(sum(p.numel() for p in encoder.parameters()))
