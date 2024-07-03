@@ -1,7 +1,6 @@
 import math
 from typing import Dict, List, Optional, Tuple, Union
 import torch
-from torch.nn.modules import activation
 
 from wenet.utils.class_utils import WENET_ACTIVATION_CLASSES
 
@@ -310,7 +309,7 @@ class SeaEncoder(torch.nn.Module):
         self.act = WENET_ACTIVATION_CLASSES['swish']()
         in_channels = hidden
         blocks = []
-        mult = 1
+        mult = 2
 
         out_channels = hidden
         for ratio in ratios:
@@ -394,13 +393,18 @@ class SeaDecoder(torch.nn.Module):
 
 
 if __name__ == '__main__':
-    encoder = SeaEncoder(128, 128, [2, 4, 5, 8])
-    print(sum(p.numel() for p in encoder.parameters()))
+    C = 32
+    encoder = SeaEncoder(C, 128, [2, 4, 5, 8])
+    encoder_params = sum(p.numel() for p in encoder.parameters())
+    print(encoder_params)
 
-    decoder = SeaDecoder(128, 128, [8, 5, 4, 2])
-    print(sum(p.numel() for p in decoder.parameters()))
+    decoder = SeaDecoder(128, C, [8, 5, 4, 2])
+    decoder_params = sum(p.numel() for p in decoder.parameters())
+    print(decoder_params)
 
-    input = torch.randn(1, 16000, 1)
+    print(encoder_params + decoder_params)
+
+    input = torch.randn(1, 32000, 1)
     output = encoder(input)
     print(output, output.shape)
 
