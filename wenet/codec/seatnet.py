@@ -1,6 +1,7 @@
 import math
 from typing import Dict, List, Optional, Tuple, Union
 import torch
+from torch.nn.modules import activation
 
 from wenet.utils.class_utils import WENET_ACTIVATION_CLASSES
 
@@ -62,7 +63,7 @@ class SConv1d(torch.nn.Module):
                  dilation: int = 1,
                  groups: int = 1,
                  bias: bool = True,
-                 pad_mode: str = 'zeros') -> None:
+                 pad_mode: str = 'constant') -> None:
         super().__init__()
         self.conv = torch.nn.Conv1d(in_channels,
                                     out_channels,
@@ -197,23 +198,23 @@ class EncoderBlock(torch.nn.Module):
         self,
         in_channels: int,
         hidden: int,
-        residual_kernel_width: int = 3,
+        residual_kernel_size: int = 3,
         stride: int = 2,
         num_residual_layers=3,
         activation: str = 'elu',
         activation_params: dict = {},
+        dilation_base: int = 3,
         norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.residual_kernel_width = residual_kernel_width
         self.stride = stride
         self.num_residual_layers = num_residual_layers
         compress_channels = hidden // 2
         self.blocks = torch.nn.ModuleList([
             SResidualUnit(in_channels if idx == 0 else compress_channels,
                           compress_channels,
-                          kernel_sizes=[residual_kernel_width, 1],
-                          dilations=[residual_kernel_width**idx, 1],
+                          kernel_sizes=[residual_kernel_size, 1],
+                          dilations=[dilation_base**idx, 1],
                           activation_type=activation,
                           activation_params=activation_params,
                           shortcut=(idx != 0))
@@ -238,7 +239,7 @@ class EncoderBlock(torch.nn.Module):
         x = x.transpose(1, 2)
         x = self.activation(self.norm(x))
         x = x.transpose(1, 2)
-        return x
+        return self.final_conv(x, cache)
 
 
 class DecoderBlock(torch.nn.Module):
@@ -246,15 +247,15 @@ class DecoderBlock(torch.nn.Module):
     def __init__(
         self,
         in_channels: int,
-        residual_kernel_width: int = 3,
+        residual_kernel_size: int = 7,
         stride: int = 2,
         num_residual_layers=3,
         activation: str = 'elu',
         activation_params: dict = {},
+        dilation_base: int = 3,
         norm_eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.residual_kernel_width = residual_kernel_width
         self.stride = stride
         self.num_residual_layers = num_residual_layers
         self.first_convT = SConvTransposed1d(in_channels,
@@ -265,8 +266,8 @@ class DecoderBlock(torch.nn.Module):
         self.blocks = torch.nn.ModuleList([
             SResidualUnit(in_channels if idx == 0 else compress_channels,
                           compress_channels,
-                          kernel_sizes=[residual_kernel_width, 1],
-                          dilations=[residual_kernel_width**idx, 1],
+                          kernel_sizes=[residual_kernel_size, 1],
+                          dilations=[dilation_base**idx, 1],
                           activation_type=activation,
                           activation_params=activation_params,
                           shortcut=(idx != 0))
@@ -279,13 +280,13 @@ class DecoderBlock(torch.nn.Module):
     def forward(self, input: torch.Tensor,
                 cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
         # TODO(Mddct): fix this cache later
-        x = self.first_convT(input)
+        x = self.first_convT(input, cache)
         for layer in self.blocks:
             x = layer(x, None)
         x = x.transpose(1, 2)
         x = self.activation(self.norm(x))
         x = x.transpose(1, 2)
-        return self.final_conv(x, cache)
+        return x
 
 
 class SeaEncoder(torch.nn.Module):
@@ -349,6 +350,60 @@ class SeaEncoder(torch.nn.Module):
         return x
 
 
+class SeaDecoder(torch.nn.Module):
+
+    def __init__(
+        self,
+        bottle_hidden: int,
+        hidden: int,
+        ratios: List[int],
+        bottle_kernel_size: int = 7,
+        last_kernel_size: int = 7,
+    ) -> None:
+        super().__init__()
+
+        mult = 2**len(ratios)
+        # UnBottleneck
+        self.unbottleneck = SConv1d(
+            bottle_hidden,
+            hidden * mult,
+            kernel_size=bottle_kernel_size,
+            pad_mode='constant',
+        )
+        blocks = []
+        for ratio in ratios:
+            # TODO: more args
+            blocks.append(
+                DecoderBlock(hidden * mult, stride=ratio, activation='swish'))
+            mult //= 2
+        self.decoders = torch.nn.ModuleList(blocks)
+
+        # final conv
+        self.final_conv = SConv1d(hidden,
+                                  out_channels=1,
+                                  kernel_size=last_kernel_size)
+
+    def forward(self, input) -> torch.Tensor:
+        # TODO: fix cache
+        x = self.unbottleneck(input, cache=None)
+
+        for _, layer in enumerate(self.decoders):
+            x = layer(x, None)
+        x = self.final_conv(x, None)
+        return x
+
+
 if __name__ == '__main__':
     encoder = SeaEncoder(128, 128, [2, 4, 5, 8])
     print(sum(p.numel() for p in encoder.parameters()))
+
+    decoder = SeaDecoder(128, 128, [8, 5, 4, 2])
+    print(sum(p.numel() for p in decoder.parameters()))
+
+    input = torch.randn(1, 16000, 1)
+    output = encoder(input)
+    print(output, output.shape)
+
+    output = decoder(output)
+    print(output)
+    print(output.shape)
