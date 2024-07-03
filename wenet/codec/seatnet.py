@@ -1,7 +1,7 @@
-from _typeshed import Incomplete
 import math
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 import torch
+from absl import logging
 
 from wenet.utils.class_utils import WENET_ACTIVATION_CLASSES
 
@@ -98,12 +98,12 @@ class SResidualUnit(torch.nn.Module):
     def __init__(self,
                  in_channels: int,
                  hidden: int,
-                 out_channels: int,
                  kernel_sizes: List[int],
                  dilations: List[int],
                  activation_type: str = 'elu',
                  activation_params: Dict = {},
-                 scale: float = 1.0) -> None:
+                 scale: float = 1.0,
+                 shortcut: bool = False) -> None:
         super().__init__()
         assert len(kernel_sizes) == len(dilations)
 
@@ -119,11 +119,11 @@ class SResidualUnit(torch.nn.Module):
             dilation=dilations[0],
             pad_mode='constant',  # not reflect for streaming
             bias=True,
-            groups=in_channels,
+            groups=hidden,
         )  # pointwise
         self.conv1 = SConv1d(
             hidden,
-            out_channels,
+            hidden,
             kernel_size=kernel_sizes[1],
             dilation=dilations[1],
             pad_mode='constant',  # not reflect for streaming
@@ -131,71 +131,81 @@ class SResidualUnit(torch.nn.Module):
             groups=1,
         )  # depthwise
         self.residual_scalar = scale
+        self.skip = shortcut
 
-    def forward(self, input: torch.Tensor,
-                cache: Union[Dict[str, torch.Tensor], None]):
+    def forward(
+            self,
+            input: torch.Tensor,
+            cache: Optional[Dict[str, torch.Tensor]] = None) -> torch.Tensor:
         x = self.activation0(input)
-        x = self.conv0(input, cache)
-        x = self.activation1(input)
+        x = self.conv0(x, cache)
+        x = self.activation1(x)
         x = self.conv1(x, cache)
-        return x + self.residual_scalar * input
+        if self.skip:
+            return x + self.residual_scalar * input
+        else:
+            return x
 
 
 class EncoderBlock(torch.nn.Module):
 
-    def __init__(self,
-                 in_channels: int,
-                 residual_kernel_width: int = 3,
-                 stride: int = 2,
-                 num_residual_layers=3,
-                 activation: str = 'ELU',
-                 activation_params: dict = {'alpha': 1.0},
-                 norm_eps: float = 1e-6,
-                 **kwargs) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        hidden: int,
+        residual_kernel_width: int = 3,
+        stride: int = 2,
+        num_residual_layers=3,
+        activation: str = 'elu',
+        activation_params: dict = {},
+        norm_eps: float = 1e-6,
+    ) -> None:
         super().__init__()
         self.residual_kernel_width = residual_kernel_width
         self.stride = stride
         self.num_residual_layers = num_residual_layers
+        compress_channels = hidden // 2
         self.blocks = torch.nn.ModuleList([
-            SResidualUnit(in_channels if idx == 0 else in_channels // 2,
-                          in_channels // 2,
-                          in_channels // 2,
+            SResidualUnit(in_channels if idx == 0 else compress_channels,
+                          compress_channels,
                           kernel_sizes=[residual_kernel_width, 1],
                           dilations=[residual_kernel_width**idx, 1],
                           activation_type=activation,
-                          activation_params=activation_params)
+                          activation_params=activation_params,
+                          shortcut=(idx != 0))
             for idx in range(self.num_residual_layers)
         ])
-        self.norm = torch.nn.LayerNorm(in_channels, eps=norm_eps)
+        self.norm = torch.nn.LayerNorm(compress_channels, eps=norm_eps)
         self.activation = WENET_ACTIVATION_CLASSES[activation](
             activation_params)
-
         self.final_conv = SConv1d(
-            in_channels // 2,
-            in_channels,
+            compress_channels,
+            hidden,
             2 * stride,
         )
 
-        def forward(
-                self, input: torch.Tensor,
+    def forward(self, input: torch.Tensor,
                 cache: Union[Dict[str, torch.Tensor], None]) -> torch.Tensor:
-            # TODO(Mddct): fix this cache later
-            x = self.blocks(input, cache)
-            x = x.transpose(1, 2)
-            x = self.activation(self.norm(x))
-            x = x.transpose(1, 2)
-            return self.final_conv(x, cache)
+        # TODO(Mddct): fix this cache later
+        x = input
+        for layer in self.blocks:
+            x = layer(x, None)
+        x = x.transpose(1, 2)
+        x = self.activation(self.norm(x))
+        x = x.transpose(1, 2)
+        return self.final_conv(x, cache)
 
 
 class SeaEncoder(torch.nn.Module):
 
-    def __init__(self,
-                 hidden: int,
-                 bottle_hidden: int,
-                 ratios: List[int],
-                 kernel_size: int = 7,
-                 bottle_kernel_size: int = 3,
-                 **kwargs) -> None:
+    def __init__(
+        self,
+        hidden: int,
+        bottle_hidden: int,
+        ratios: List[int],
+        kernel_size: int = 7,
+        bottle_kernel_size: int = 3,
+    ) -> None:
         super().__init__()
 
         self.conv0 = SConv1d(1,
@@ -207,33 +217,39 @@ class SeaEncoder(torch.nn.Module):
         in_channels = hidden
         blocks = []
         mult = 1
-        for (_, ratio) in enumerate(ratios):
+
+        out_channels = hidden
+        for ratio in ratios:
+            in_channels = out_channels
+            out_channels = hidden * mult
             blocks.append(
                 EncoderBlock(
-                    in_channels=mult * in_channels,
+                    in_channels=in_channels,
+                    hidden=out_channels,
                     stride=ratio,
                     activation='swish',
                 ))
             mult *= 2
 
-        self.encocers = torch.nn.Sequential(*blocks)
+        self.encoders = torch.nn.ModuleList(blocks)
         # Bottleneck
-        self.bottleneck = SConv1d(multi * in_channel,
+        self.bottleneck = SConv1d(out_channels,
                                   bottle_hidden,
                                   kernel_size=bottle_kernel_size,
                                   pad_mode='constant')
 
-    def foreard(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         """
         Args:
             input: shape [B,T,1]
         """
         input = input.transpose(1, 2)
-        x = self.conv0(input)
+        x = self.conv0(input, None)
         x = self.act(self.norm0(x.transpose(1, 2)))
         x = x.transpose(1, 2)
 
-        #TODO: fix cache
-        x = self.encoders(x)
-        x = self.bottleneck(x)
+        # #TODO: fix cache
+        for i, layer in enumerate(self.encoders):
+            x = layer(x, None)
+        x = self.bottleneck(x, None)
         return x
