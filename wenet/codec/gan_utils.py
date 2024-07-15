@@ -1,10 +1,39 @@
-from typing import Optional
+from typing import List, Optional
 import torch
 from torch.nn.utils import weight_norm
 from wenet.transformer.encoder import ConformerEncoder
 
 from wenet.utils.class_utils import WENET_ACTIVATION_CLASSES
 from wenet.utils.mask import make_pad_mask
+
+
+def mel_loss(
+    real: torch.Tensor,
+    gen: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+    splits: List[int] = [],
+    weight: Optional[List[float]] = None,
+) -> torch.Tensor:
+    """
+    Args:
+        real: shape [B, D, T]
+        gen: shape [B, D, T]
+        mask: shape [B, 1, T]
+    """
+    mel_l1 = (gen - real).abs()
+    splits = [0] + splits + [real.size(1)]
+    losses = []
+    i = 0
+    for (start, end) in zip(splits[:-1], splits[1:]):
+        loss = mel_l1[:, start:end, :]
+        if weight is not None:
+            loss *= weight[i]
+            losses.append(loss)
+        i += 1
+    losses = torch.stack(losses, dim=0)
+    if mask is not None:
+        losses = (losses * mask) / mask.sum()
+    return losses.sum()
 
 
 class Discriminator(torch.nn.Module):
@@ -129,6 +158,7 @@ if __name__ == "__main__":
     print(y.shape)
 
     model = ConformerDiscriminator(input_size=1024, output_size=256)
+    print(sum(p.numel() for p in model.parameters()) / 1_000_000)
     x_lens = torch.tensor([128])
     y, _ = model(x, x_lens)
     print(y.shape)
