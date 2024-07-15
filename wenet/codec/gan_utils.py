@@ -36,6 +36,18 @@ def mel_loss(
     return losses.sum()
 
 
+def intermediate_loss(intermediate_real: List[torch.Tensor],
+                      intermediate_gen: List[torch.Tensor]):
+    """ intermediate_real for generator, intermediate_* from Discriminator
+    """
+    assert len(intermediate_real) == len(intermediate_gen)
+    loss = 0.0
+    for r, g in zip(intermediate_real, intermediate_gen):
+        loss += torch.mean(torch.abs(r.detach() - g))
+
+    return loss / len(intermediate_real) * 2.0
+
+
 class Discriminator(torch.nn.Module):
 
     def __init__(self,
