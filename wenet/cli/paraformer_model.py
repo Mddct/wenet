@@ -8,25 +8,18 @@ from wenet.cli.hub import Hub
 from wenet.paraformer.search import (gen_timestamps_from_peak,
                                      paraformer_greedy_search)
 from wenet.text.paraformer_tokenizer import ParaformerTokenizer
+from wenet.utils.common import TORCH_NPU_AVAILABLE  # noqa just ensure to check torch-npu
 
 
 class Paraformer:
 
-    def __init__(self,
-                 model_dir: str,
-                 device: int = -1,
-                 resample_rate: int = 16000) -> None:
+    def __init__(self, model_dir: str, resample_rate: int = 16000) -> None:
 
         model_path = os.path.join(model_dir, 'final.zip')
         units_path = os.path.join(model_dir, 'units.txt')
         self.model = torch.jit.load(model_path)
         self.resample_rate = resample_rate
-        if device >= 0:
-            device = 'cuda:{}'.format(device)
-        else:
-            device = 'cpu'
-        self.device = torch.device(device)
-        self.model = self.model.to(self.device)
+        self.device = torch.device("cpu")
         self.tokenizer = ParaformerTokenizer(symbol_table=units_path)
 
     def transcribe(self, audio_file: str, tokens_info: bool = False) -> dict:
@@ -40,7 +33,8 @@ class Paraformer:
                             frame_length=25,
                             frame_shift=10,
                             energy_floor=0.0,
-                            sample_frequency=self.resample_rate)
+                            sample_frequency=self.resample_rate,
+                            window_type="hamming")
         feats = feats.unsqueeze(0)
         feats_lens = torch.tensor([feats.size(1)],
                                   dtype=torch.int64,
@@ -62,9 +56,9 @@ class Paraformer:
             for i, x in enumerate(res.tokens):
                 tokens_info.append({
                     'token': self.tokenizer.char_dict[x],
-                    'start': times[i][0],
-                    'end': times[i][1],
-                    'confidence': res.tokens_confidence[i]
+                    'start': round(times[i][0], 3),
+                    'end': round(times[i][1], 3),
+                    'confidence': round(res.tokens_confidence[i], 2)
                 })
             result['tokens'] = tokens_info
 
@@ -74,7 +68,15 @@ class Paraformer:
         raise NotImplementedError("Align is currently not supported")
 
 
-def load_model(model_dir: str = None, gpu: int = -1) -> Paraformer:
+def load_model(model_dir: str = None,
+               gpu: int = -1,
+               device: str = "cpu") -> Paraformer:
     if model_dir is None:
         model_dir = Hub.get_model_by_lang('paraformer')
-    return Paraformer(model_dir, gpu)
+    if gpu != -1:
+        # remain the original usage of gpu
+        device = "cuda"
+    paraformer = Paraformer(model_dir)
+    paraformer.device = torch.device(device)
+    paraformer.model.to(device)
+    return paraformer
