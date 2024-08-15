@@ -138,8 +138,8 @@ class SoundStorm(torch.nn.Module):
 
     def forward(self, batch: dict, device: torch.device):
         # NOTE(Mddct) we assume semantic.size() == acoustic[:,:,0].size() for now
-        semantics = batch['semantics'].to(device)
-        acoustics = batch['acoustics'].to(device)
+        semantics = batch['semantics'].to(device)  # [B,T]
+        acoustics = batch['acoustics'].to(device)  # [B,T,Q]
         lengths = batch['lengths'].to(device)
 
         # TODO: assert
@@ -173,7 +173,8 @@ class SoundStorm(torch.nn.Module):
         logits += self.to_logits_bias
         logits = logits.view(B, -1, logits.size(-1))
 
-        loss = torch.nn.functional.cross_entropy(logits[mask], semantics[mask])
+        loss = torch.nn.functional.cross_entropy(logits[mask],
+                                                 acoustics.view(B, -1)[mask])
         return {"loss": loss}
 
     @torch.no_grad()
