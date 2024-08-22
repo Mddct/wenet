@@ -71,7 +71,7 @@ class SoundStorm(torch.nn.Module):
         total_codes = (codebook_size + 1) * num_quantizers * grouped_quantizers
         self.mask_id = codebook_size + 1
         self.semantic_embeding = torch.nn.Embedding(num_semantic_tokens,
-                                                    self.dim)
+                                                    hidden)
         self.codec_embeding = torch.nn.Embedding(
             total_codes,
             hidden,
@@ -94,7 +94,7 @@ class SoundStorm(torch.nn.Module):
         self.to_logits_weight = torch.nn.Parameter(
             torch.randn(total_quantizers, output_size, codebook_size))
         self.to_logits_bias = torch.nn.Parameter(
-            torch.randn(output_size, codebook_size))
+            torch.randn(total_quantizers, codebook_size))
 
         self.register_buffer(
             'quantizer_offsets',
@@ -105,22 +105,23 @@ class SoundStorm(torch.nn.Module):
     def _mask_acoustics(self, acoustics: torch.Tensor, mask: torch.Tensor):
         device = acoustics.device
         B, T, _ = acoustics.size()
-        t = torch.randint(0, T, device=acoustics.device)
+        t = torch.randint(0, T, (), device=acoustics.device)
         t_mask = mask[:, t:]
 
-        rand_times = torch.empty(b, device=acoustics.device).uniform_(0, 1)
+        rand_times = torch.empty(B, device=acoustics.device).uniform_(0, 1)
         p = schedule(rand_times)
 
         t_mask = get_mask_subset_prob(t_mask, p)
 
-        q = torch.randint(0, T,
-                          device=acoustics.device) * self.grouped_quantizers
+        q = torch.randint(
+            0, self.total_quantizers,
+            (), device=acoustics.device) * self.grouped_quantizers
 
         masked = torch.where(t_mask, self.mask_id, acoustics[:, t:, q])
         masked = torch.cat((acoustics[:, :t, q], masked), dim=1).unsqueeze(2)
 
-        masked = torch.cat((acoustics[:, :, :q], masked, acoustics[:, :, q:]),
-                           dim=2)
+        masked = torch.cat(
+            (acoustics[:, :, :q], masked, acoustics[:, :, q + 1:]), dim=2)
         masked[:, :, q + 1:] = self.mask_id
 
         prompt_mask = torch.full((B, t), False, device=device)
@@ -129,7 +130,8 @@ class SoundStorm(torch.nn.Module):
                                            True,
                                            device=device)
         upper_quantizers_mask[:, :t, :] = False
-        mask = torch.cat((prompt_mask, mask), dim=1).unsqueeze(2)  # (B, T,12)
+        mask = torch.cat((prompt_mask, t_mask),
+                         dim=1).unsqueeze(2)  # (B, T,12)
         mask = torch.cat((lower_quantizers_mask, mask, upper_quantizers_mask),
                          dim=2)
         mask[:, :, q + 1:] = False
@@ -141,6 +143,8 @@ class SoundStorm(torch.nn.Module):
         semantics = batch['semantics'].to(device)  # [B,T]
         acoustics = batch['acoustics'].to(device)  # [B,T,Q]
         lengths = batch['lengths'].to(device)
+
+        acoustics += self.quantizer_offsets
 
         # TODO: assert
         # TODO: speech prompt: spk embedding, 3s prompts, 0-15s prompts
@@ -158,8 +162,7 @@ class SoundStorm(torch.nn.Module):
 
         masked_acoustics = masked_acoustics.view(
             B, T, -1, self.num_quantizers)  # (B,T,G,q)
-        masked_acoustics += self.quantizer_offsets
-        acoustic_emb = self.codec_embeding(mask_finished_preds)  # (B,T,G,q,E)
+        acoustic_emb = self.codec_embeding(masked_acoustics)  # (B,T,G,q,E)
         acoustic_emb = self.embedding_proj(
             acoustic_emb.sum(-2).view(B, T, -1))  # (B,T,E)
 

@@ -20,13 +20,16 @@ def padding(data):
     sample = data
     assert isinstance(sample, list)
 
+    lengths = [
+        min(len(obj['acoustic']), len(obj['semantic'])) for obj in sample
+    ]
     acoustics = [
-        torch.tensor(acoustic, dtype=torch.int)
-        for acoustic in sample['acoustic']
+        torch.tensor(obj['acoustic'][:lengths[i]], dtype=torch.int)
+        for i, obj in enumerate(sample)
     ]
     semantics = [
-        torch.tensor(semantic, dtype=torch.int)
-        for semantic in sample['semantic']
+        torch.tensor(obj['semantic'][:lengths[i]], dtype=torch.int)
+        for i, obj in enumerate(sample)
     ]
 
     padded_acoustics = pad_sequence(acoustics,
@@ -35,8 +38,7 @@ def padding(data):
     padded_semantics = pad_sequence(semantics,
                                     batch_first=True,
                                     padding_value=0)
-    lengths = [torch.tensor(length, dtype=torch.int) for length in sample]
-    lengths = torch.cat(lengths, dim=0)
+    lengths = torch.tensor(lengths)
     batch = {
         'acoustics': padded_acoustics,
         'semantics': padded_semantics,
