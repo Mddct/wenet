@@ -174,10 +174,10 @@ class SoundStorm(torch.nn.Module):
 
         logits = torch.einsum('bngd,gdl->bngl', heads, self.to_logits_weight)
         logits += self.to_logits_bias
-        logits = logits.view(B, -1, logits.size(-1))
+        c = logits.size(-1)
+        logits = logits.contiguous().view(-1, c)
 
-        loss = torch.nn.functional.cross_entropy(logits[mask],
-                                                 acoustics.view(B, -1)[mask])
+        loss = torch.nn.functional.cross_entropy(logits, acoustics.view(-1))
         return {"loss": loss}
 
     @torch.no_grad()
