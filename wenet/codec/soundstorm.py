@@ -144,7 +144,8 @@ class SoundStorm(torch.nn.Module):
         acoustics = batch['acoustics'].to(device)  # [B,T,Q]
         lengths = batch['lengths'].to(device)
 
-        acoustics += self.quantizer_offsets
+        targets = acoustics
+        acoustics = acoustics + self.quantizer_offsets
 
         # TODO: assert
         # TODO: speech prompt: spk embedding, 3s prompts, 0-15s prompts
@@ -175,9 +176,9 @@ class SoundStorm(torch.nn.Module):
         logits = torch.einsum('bngd,gdl->bngl', heads, self.to_logits_weight)
         logits += self.to_logits_bias
         c = logits.size(-1)
-        logits = logits.contiguous().view(-1, c)
-
-        loss = torch.nn.functional.cross_entropy(logits, acoustics.view(-1))
+        logits = logits.contiguous().view(B, -1, c)
+        loss = torch.nn.functional.cross_entropy(logits[mask],
+                                                 targets.view(B, -1)[mask])
         return {"loss": loss}
 
     @torch.no_grad()
