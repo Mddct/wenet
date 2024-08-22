@@ -43,7 +43,6 @@ from wenet.whisper.whisper import Whisper
 from wenet.utils.cmvn import load_cmvn
 from wenet.utils.checkpoint import load_checkpoint, load_trained_modules
 
-
 WENET_ENCODER_CLASSES = {
     "transformer": TransformerEncoder,
     "conformer": ConformerEncoder,
@@ -194,6 +193,16 @@ def init_model(args, configs):
     configs['model'] = model_type
     if model_type == 'causal_lm':
         model, configs = init_causal_llm(configs)
+    elif model_type == 'sound_storm':
+        global_cmvn = None
+
+        input_dim = configs['input_dim']
+        encoder = WENET_ENCODER_CLASSES['conformer'](input_dim,
+                                                     global_cmvn=global_cmvn,
+                                                     **configs['encoder_conf'])
+        from wenet.codec.init_model import init_model as init_soundstorm
+        model = init_soundstorm(configs, encoder)
+
     else:
         model, configs = init_speech_model(args, configs)
 
