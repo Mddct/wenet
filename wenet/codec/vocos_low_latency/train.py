@@ -3,6 +3,7 @@ import os
 from typing import List, Tuple
 
 import torch
+from torch.distributed import is_initialized
 from torch.nn import DataParallel, parallel
 import torchaudio
 from wenet.codec.vocos_low_latency.dataset import init_train_dataset, multihost_dataloader
@@ -392,6 +393,8 @@ def main():
 
     global_step = 0
     mel_loss_fn = MelSpecReconstructionLoss().to(device)
+    if dist.is_initialized():
+        dist.barrier()
     for i, batch in enumerate(train_iter):
         metric = train_step(batch, train_state, config, mel_loss_fn, device,
                             global_step)
