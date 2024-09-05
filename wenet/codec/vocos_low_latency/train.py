@@ -104,7 +104,7 @@ class MelSpecReconstructionLoss():
         Returns:
             Tensor: L1 loss between the mel-scaled magnitude spectrograms.
         """
-        mel_hat = torch.log(torch.clip(self.mel_spec(y_hat, min=1e-7)))
+        mel_hat = torch.log(torch.clip(self.mel_spec(y_hat), min=1e-7))
         mel = torch.log(torch.clip(self.mel_spec(y), min=1e-7))
         loss = torch.nn.functional.l1_loss(mel, mel_hat)
 
@@ -334,7 +334,7 @@ def main():
                                  args.pin_memory,
                                  seed=2024)
     device = torch.device(args.device)
-    # init model
+    # init modelg
     model_config = vocos_config()
     model_config.input_size = 128
     model_config.n_fft = 2048
