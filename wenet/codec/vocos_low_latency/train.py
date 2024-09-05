@@ -405,7 +405,7 @@ def main():
         if i % 100 == 0:
             log_str = f'iter i'
             for name, value in metric.items():
-                log_str += '| {:.6f} i'.format(tensor_to_scalar(value))
+                log_str += '| {} {:.6f} '.format(name, tensor_to_scalar(value))
             print(log_str + "| rank {}".format(rank))
 
         # save interval
