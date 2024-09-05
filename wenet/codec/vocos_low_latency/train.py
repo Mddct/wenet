@@ -335,7 +335,7 @@ def main():
                                  seed=2024)
     device = torch.device(args.device)
     # init model
-    model_config = vocos_config()
+    model_config = vocos_config(input_size=128, n_fft=2048, hop_length=640)
     model = Vocosv1(model_config)
     multiperioddisc = MultiPeriodDiscriminator()
     multiresddisc = MultiResolutionDiscriminator()
