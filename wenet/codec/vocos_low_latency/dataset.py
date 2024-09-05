@@ -80,7 +80,7 @@ class MelSpectrogramFeatures:
         Returns:
             Tensor: L1 loss between the mel-scaled magnitude spectrograms.
         """
-        mel = torch.log(torch.clip(self.mel_spec(wav, min=1e-7)))
+        mel = torch.log(torch.clip(self.mel_spec(y, min=1e-7)))
         return mel
 
 
