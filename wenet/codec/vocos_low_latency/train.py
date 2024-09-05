@@ -322,6 +322,7 @@ def main():
     # TODO: args
     args = get_args()
     args.train_engine = 'torch_ddp'
+    args.dist_backend = 'nccl'
     _, _, rank = init_distributed(args)
 
     # init dataset
