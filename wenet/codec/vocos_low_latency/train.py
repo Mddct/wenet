@@ -321,6 +321,7 @@ def get_args():
 def main():
     # TODO: args
     args = get_args()
+    args.train_engine = 'torch_ddp'
     _, _, rank = init_distributed(args)
 
     # init dataset
