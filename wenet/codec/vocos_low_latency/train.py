@@ -409,7 +409,7 @@ def main():
             print(log_str + "| rank {}".format(rank))
 
         # save interval
-        if i % 2000 == 0:
+        if rank == 0 and i % 2000 == 0:
             save_checkpoint(args.model_dir, train_state)
 
 
