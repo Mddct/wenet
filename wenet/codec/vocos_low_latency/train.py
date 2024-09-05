@@ -391,7 +391,7 @@ def main():
     # TODO: restore_ckpt(args)
 
     global_step = 0
-    mel_loss_fn = MelSpecReconstructionLoss()
+    mel_loss_fn = MelSpecReconstructionLoss().to(device)
     for i, batch in enumerate(train_iter):
         metric = train_step(batch, train_state, config, mel_loss_fn, device,
                             global_step)
