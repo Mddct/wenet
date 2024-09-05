@@ -410,7 +410,7 @@ def main():
 
         # save interval
         if i % 2000 == 0:
-            save_checkpoint(args.model_path, train_state)
+            save_checkpoint(args.model_dir, train_state)
 
 
 if __name__ == '__main__':
