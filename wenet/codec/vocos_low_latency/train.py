@@ -256,7 +256,7 @@ def save_checkpoint(ckpt_dir, train_state: TrainState):
     global_step = train_state.global_step
 
     model_opt_dir = os.path.join(ckpt_dir, 'step_' + str(global_step))
-    os.makedirs(model_opt_dir)
+    os.makedirs(model_opt_dir, exist_ok=True)
 
     def _save_checkpoint(model_or_opt, path: str, name: str):
         if isinstance(model_or_opt, torch.nn.DataParallel):
