@@ -314,6 +314,7 @@ def get_args():
                         default='cuda',
                         choices=["cpu", "npu", "cuda"])
     parser.add_argument('--model_dir', required=True, type=str)
+    parser.add_argument('--tensorboard_dir', required=True, type=str)
     args = parser.parse_args()
     return args
 
