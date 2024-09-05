@@ -397,7 +397,7 @@ def main():
                             global_step)
 
         # write to tensorboard
-        for name, value in metric:
+        for name, value in metric.items():
             writer.add_scalar(name, tensor_to_scalar(value), i)
 
         # log interval
