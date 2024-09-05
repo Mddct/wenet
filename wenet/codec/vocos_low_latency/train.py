@@ -349,7 +349,7 @@ def main():
             "params": multiperioddisc.parameters()
         },
         {
-            "params": model.multiresddisc.parameters()
+            "params": multiresddisc.parameters()
         },
     ]
     gen_params = [
