@@ -376,9 +376,9 @@ def main():
         model = torch.nn.parallel.DistributedDataParallel(
             model, find_unused_parameters=False)
         multiperioddisc = torch.nn.parallel.DistributedDataParallel(
-            multiperioddisc, find_unused_parameters=False)
+            multiperioddisc, find_unused_parameters=True)
         multiresddisc = torch.nn.parallel.DistributedDataParallel(
-            multiresddisc, find_unused_parameters=False)
+            multiresddisc, find_unused_parameters=True)
     train_state = create_state(
         model,
         multiperioddisc,
