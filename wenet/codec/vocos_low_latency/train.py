@@ -397,15 +397,16 @@ def main():
                             global_step)
 
         # write to tensorboard
-        for name, value in metric.items():
-            writer.add_scalar(name, tensor_to_scalar(value), i)
+        if rank == 0:
+            for name, value in metric.items():
+                writer.add_scalar(name, tensor_to_scalar(value), i)
 
         # log interval
         if i % 100 == 0:
             log_str = f'iter i'
             for name, value in metric:
                 log_str += '| {:.6f} '.format(tensor_to_scalar(value))
-            print(log_str)
+            print(log_str + "| rank {}".format(rank))
 
         # save interval
         if i % 2000 == 0:
