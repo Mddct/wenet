@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Optional, Tuple
 import torch
-from torch.nn import attention
 from torch.nn.modules import activation
 from wenet.transformer.attention import T_CACHE, MultiHeadedAttention
 from wenet.transformer.convolution import ConvolutionModule
