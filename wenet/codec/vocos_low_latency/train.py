@@ -1,11 +1,16 @@
 from dataclasses import dataclass
+import os
 from typing import List, Tuple
 
 import torch
+from torch.nn import DataParallel, parallel
 import torchaudio
+from wenet.codec.vocos_low_latency.dataset import init_train_dataset, multihost_dataloader
 from wenet.codec.vocos_low_latency.discriminators import (
     MultiPeriodDiscriminator, MultiResolutionDiscriminator)
 from wenet.codec.vocos_low_latency.vocos_my import (Vocosv1, vocos_config)
+from wenet.utils.checkpoint import save_state_dict_and_infos
+from wenet.utils.common import tensor_to_scalar
 from wenet.utils.scheduler import WarmupLR
 from wenet.utils.train_utils import init_distributed, init_summarywriter
 
@@ -51,6 +56,20 @@ def compute_feature_matching_loss(
             loss += torch.mean(torch.abs(rl - gl))
 
     return loss
+
+
+def init_train_iter(
+    data_list_file,
+    epoch,
+    num_workers,
+    prefetch,
+    pin_memory,
+    seed=2024,
+):
+    dataset = init_train_dataset(data_list_file, epoch)
+    dataloader = multihost_dataloader(dataset, num_workers, prefetch,
+                                      pin_memory, seed)
+    return dataloader
 
 
 class MelSpecReconstructionLoss():
@@ -121,6 +140,9 @@ class TrainState:
     optimizer_d: torch.optim.Optimizer
     optimizer_g: torch.optim.Optimizer
 
+    # global_step
+    global_step = 0
+
     def __call__(self, input, input_lens):
         return self.model(input, input_lens)
 
@@ -134,36 +156,18 @@ def create_state(model, multiperioddisc, multiresddisc, opt_disc, opt_gen,
                       optimizer_g=opt_gen,
                       scheduler_d=opt_d_scheduler,
                       scheduler_g=opt_g_scheduler)
-    # disc_params = [
-    #     {
-    #         "params": state.multiperioddisc.parameters()
-    #     },
-    #     {
-    #         "params": state.multiresddisc.parameters()
-    #     },
-    # ]
-    # gen_params = [
-    #     {
-    #         "params": state.model.parameters()
-    #     },
-    # ]
-    # opt_disc = torch.optim.AdamW(disc_params,
-    #                              lr=self.hparams.initial_learning_rate,
-    #                              betas=(0.8, 0.9))
-    # opt_gen = torch.optim.AdamW(gen_params,
-    #                             lr=self.hparams.initial_learning_rate,
-    #                             betas=(0.8, 0.9))
 
 
 def train_step(batch,
                state: TrainState,
                train_config: TrainConfig,
                mel_loss_fn,
+               device,
                global_step: int = 0,
                **kwargs):
 
-    mels, mels_lens = batch['mels'], batch['mels_lens']
-    audio, _ = batch['wavs'], batch['wavs_lens']
+    mels, mels_lens = batch['mels'].to(device), batch['mels_lens'].to(device)
+    audio = batch['wavs'].to(device)
     metrics = {}
     for idx in [0, 1]:
         # 1 train discriminator
@@ -198,7 +202,7 @@ def train_step(batch,
             metrics["discriminator/multi_res_loss"] = loss_mrd
             state.optimizer_d.zero_grad()
             loss.backward()
-            state.optimizer_d.step()
+            state.scheduler_d.step()
 
         else:
             audio_hat, audio_hat_lens = state(mels, mels_lens)
@@ -233,7 +237,7 @@ def train_step(batch,
                     train_config.mel_loss_coeff * mel_loss)
             state.optimizer_g.zero_grad()
             loss.backward()
-            state.optimizer_g.step()
+            state.scheduler_g.step()
 
             metrics["generator/total_loss"] = loss
             metrics["generator/mel_loss"] = mel_loss
@@ -245,14 +249,88 @@ def train_step(batch,
     return metrics
 
 
+def save_checkpoint(ckpt_dir, train_state: TrainState):
+    "chpt_dir/step_1200/model.pt"
+    'ckpt_dir/step_1200/opt.pt'
+
+    global_step = train_state.global_step
+
+    model_opt_dir = os.path.join(ckpt_dir, 'step_' + str(global_step))
+    os.makedirs(model_opt_dir)
+
+    def _save_checkpoint(model_or_opt, path: str, name: str):
+        if isinstance(model_or_opt, torch.nn.DataParallel):
+            state_dict = model_or_opt.module.state_dict()
+        elif isinstance(model_or_opt,
+                        torch.nn.parallel.DistributedDataParallel):
+            state_dict = model_or_opt.module.state_dict()
+        else:
+            state_dict = model_or_opt.state_dict()
+        torch.save({name: state_dict}, path)
+
+    # model: generator
+    model_path = os.path.join(model_opt_dir, 'model.pt')
+    _save_checkpoint(train_state.model, model_path, 'model')
+
+    # discriminattor
+    period_d_path = os.path.join(model_opt_dir, 'model_period_d.pt')
+    _save_checkpoint(train_state.multiperioddisc, period_d_path, 'period_d')
+    res_d_path = os.path.join(model_opt_dir, 'model_res_d.pt')
+    _save_checkpoint(train_state.multiresddisc, res_d_path, 'res_g')
+
+    # optimizer
+    opt_g_path = os.path.join(model_opt_dir, 'opt_g.pt')
+    _save_checkpoint(train_state.optimizer_g, opt_g_path, 'opt_g')
+
+    opt_d_path = os.path.join(model_opt_dir, 'opt_d.pt')
+    _save_checkpoint(train_state.optimizer_d, opt_d_path, 'opt_d')
+
+    # scheduler
+    opt_d_path = os.path.join(model_opt_dir, 'scheduler_d.pt')
+    _save_checkpoint(train_state.scheduler_d, opt_d_path, 'scheduler_d')
+
+    opt_d_path = os.path.join(model_opt_dir, 'scheduler_g.pt')
+    _save_checkpoint(train_state.scheduler_g, opt_g_path, 'scheduler_g')
+
+
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='training your network')
+    parser.add_argument('--data_list', required=True, help='train data file')
+    parser.add_argument('--num_workers',
+                        default=0,
+                        type=int,
+                        help='num of subprocess workers for reading')
+    parser.add_argument('--pin_memory',
+                        action='store_true',
+                        default=False,
+                        help='Use pinned memory buffers used for reading')
+    parser.add_argument('--prefetch',
+                        default=100,
+                        type=int,
+                        help='prefetch number')
+    parser.add_argument('--device',
+                        type=str,
+                        default='cuda',
+                        choices=["cpu", "npu", "cuda"])
+    parser.add_argument('--model_path', type=str)
+    args = parser.parse_args()
+    return args
+
+
 def main():
     # TODO: args
-    args = ""
+    args = get_args()
     _, _, rank = init_distributed(args)
 
     # init dataset
-    train_iter = ...
-    eval_iter = ...
+    train_iter = init_train_iter(args.data_list,
+                                 100,
+                                 args.num_workers,
+                                 args.prefetch,
+                                 args.pin_memory,
+                                 seed=2024)
+    device = torch.device(args.device)
     # init model
     model_config = vocos_config()
     model = Vocosv1(model_config)
@@ -290,14 +368,39 @@ def main():
             multiperioddisc, find_unused_parameters=False)
         multiresddisc = torch.nn.parallel.DistributedDataParallel(
             multiresddisc, find_unused_parameters=False)
+    model.to(device)
+    multiperioddisc.to(device)
+    multiresddisc.to(device)
 
-    train_state = create_state(model, multiperioddisc, multiresddisc, opt_disc,
-                               opt_gen, scheduler_disc, scheduler_gen)
+    train_state = create_state(
+        model,
+        multiperioddisc,
+        multiresddisc,
+        opt_disc,
+        opt_gen,
+        scheduler_disc,
+        scheduler_gen,
+    )
+
+    # TODO: restore_ckpt(args)
 
     global_step = 0
     mel_loss_fn = MelSpecReconstructionLoss()
-    for batch in enumerate(train_iter):
-        metric = train_step(batch, train_state, mel_loss_fn, global_step)
-        # TODO:
-        # writer to tensorboard
-        # interval logging
+    for i, batch in enumerate(train_iter):
+        metric = train_step(batch, train_state, config, mel_loss_fn, device,
+                            global_step)
+
+        # write to tensorboard
+        for name, value in metric:
+            writer.add_scalar(name, tensor_to_scalar(value), i)
+
+        # log interval
+        if i % 100 == 0:
+            log_str = f'iter i'
+            for name, value in metric:
+                log_str += '| {:.6f} '.format(tensor_to_scalar(value))
+            print(log_str)
+
+        # save interval
+        if i % 2000 == 0:
+            save_checkpoint(args.model_path, train_state)
