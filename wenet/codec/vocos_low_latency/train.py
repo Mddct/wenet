@@ -374,7 +374,7 @@ def main():
     import torch.distributed as dist
     if dist.is_initialized():
         model = torch.nn.parallel.DistributedDataParallel(
-            model, find_unused_parameters=False)
+            model, find_unused_parameters=True)
         multiperioddisc = torch.nn.parallel.DistributedDataParallel(
             multiperioddisc, find_unused_parameters=True)
         multiresddisc = torch.nn.parallel.DistributedDataParallel(
