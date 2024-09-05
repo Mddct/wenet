@@ -85,11 +85,11 @@ class MelSpectrogramFeatures:
 
 
 def batching(samples):
-    keys = [key for key in samples['key']]
-    wavs = [wav for wav in samples['wav']]
-    wavs_lens = [wav_lens for wav_lens in samples['wav_lens']]
-    mels_lens = [mel_lens for mel_lens in samples['mel_lens']]
-    mels = [mel for mel in samples['mel']]
+    keys = [sample['key'] for sample in samples]
+    wavs = [sample['wav'] for sample in samples]
+    wavs_lens = [sample['wav_lens'] for sample in samples]
+    mels_lens = [sample['mel_lens'] for sample in samples]
+    mels = [sample['mel'] for sample in samples]
 
     wavs_tensor = torch.cat(wavs, dim=0)
     mels_tensor = torch.cat(mels, dim=0)
