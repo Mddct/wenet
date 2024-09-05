@@ -72,7 +72,7 @@ def init_train_iter(
     return dataloader
 
 
-class MelSpecReconstructionLoss():
+class MelSpecReconstructionLoss(torch.nn.Module):
     """
     L1 distance between the mel-scaled magnitude spectrograms of the ground truth sample and the generated sample
     """
@@ -95,7 +95,7 @@ class MelSpecReconstructionLoss():
             power=1,
         )
 
-    def __call__(self, y_hat, y) -> torch.Tensor:
+    def forward(self, y_hat, y) -> torch.Tensor:
         """
         Args:
             y_hat (Tensor): Predicted audio waveform.
