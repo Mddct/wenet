@@ -98,7 +98,7 @@ class ISTFTHead(torch.nn.Module):
                            self.n_fft,
                            self.hop_length,
                            self.win_length,
-                           self.window,
+                           self.window.to(x.device),
                            center=True)
 
 
