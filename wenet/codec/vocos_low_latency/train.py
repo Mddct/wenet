@@ -250,8 +250,8 @@ def train_step(batch,
 
 
 def save_checkpoint(ckpt_dir, train_state: TrainState):
-    "chpt_dir/step_1200/model.pt"
-    'ckpt_dir/step_1200/opt.pt'
+    # "chpt_dir/step_1200/model.pt"
+    # 'ckpt_dir/step_1200/opt.pt'
 
     global_step = train_state.global_step
 
@@ -404,3 +404,7 @@ def main():
         # save interval
         if i % 2000 == 0:
             save_checkpoint(args.model_path, train_state)
+
+
+if __name__ == '__main__':
+    main()
