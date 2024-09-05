@@ -313,7 +313,7 @@ def get_args():
                         type=str,
                         default='cuda',
                         choices=["cpu", "npu", "cuda"])
-    parser.add_argument('--model_path', type=str)
+    parser.add_argument('--model_path', required=True, type=str)
     args = parser.parse_args()
     return args
 
@@ -362,6 +362,10 @@ def main():
     scheduler_disc = WarmupLR(opt_disc, **config.disc_scheduler_config)
     scheduler_gen = WarmupLR(opt_gen, **config.gen_scheduler_config)
 
+    model.to(device)
+    multiperioddisc.to(device)
+    multiresddisc.to(device)
+
     import torch.distributed as dist
     if dist.is_initialized():
         model = torch.nn.parallel.DistributedDataParallel(
@@ -370,11 +374,7 @@ def main():
             multiperioddisc, find_unused_parameters=False)
         multiresddisc = torch.nn.parallel.DistributedDataParallel(
             multiresddisc, find_unused_parameters=False)
-    model.to(device)
-    multiperioddisc.to(device)
-    multiresddisc.to(device)
-
-    train_state = create_state(
+     train_state = create_state(
         model,
         multiperioddisc,
         multiresddisc,
