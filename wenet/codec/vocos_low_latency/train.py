@@ -159,14 +159,10 @@ def create_state(model, multiperioddisc, multiresddisc, opt_disc, opt_gen,
                       scheduler_g=opt_g_scheduler)
 
 
-def train_step(batch,
-               state: TrainState,
-               train_config: TrainConfig,
-               mel_loss_fn,
-               device,
-               global_step: int = 0,
-               **kwargs):
+def train_step(batch, state: TrainState, train_config: TrainConfig,
+               mel_loss_fn, device, **kwargs):
 
+    global_step = state.global_step
     mels, mels_lens = batch['mels'].to(device), batch['mels_lens'].to(device)
     audio = batch['wavs'].to(device)
     metrics = {}
@@ -398,9 +394,7 @@ def main():
     if dist.is_initialized():
         dist.barrier()
     for i, batch in enumerate(train_iter):
-        metric = train_step(batch, train_state, config, mel_loss_fn, device,
-                            global_step)
-
+        metric = train_step(batch, train_state, config, mel_loss_fn, device)
         # write to tensorboard
         if rank == 0:
             for name, value in metric.items():
