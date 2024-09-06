@@ -201,8 +201,8 @@ def train_step(batch,
             metrics["discriminator/total"] = loss
             metrics["discriminator/multi_period_loss"] = loss_mp
             metrics["discriminator/multi_res_loss"] = loss_mrd
-            state.optimizer_d.zero_grad()
             loss.backward()
+            state.optimizer_d.zero_grad()
             state.scheduler_d.step()
 
         else:
@@ -236,8 +236,8 @@ def train_step(batch,
             loss = (loss_gen_mp + train_config.mrd_loss_coeff * loss_gen_mrd +
                     loss_fm_mp + train_config.mrd_loss_coeff * loss_fm_mrd +
                     train_config.mel_loss_coeff * mel_loss)
-            state.optimizer_g.zero_grad()
             loss.backward()
+            state.optimizer_g.zero_grad()
             state.scheduler_g.step()
 
             metrics["generator/total_loss"] = loss
