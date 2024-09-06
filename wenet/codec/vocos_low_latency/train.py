@@ -147,6 +147,11 @@ class TrainState:
     def __call__(self, input, input_lens):
         return self.model(input, input_lens)
 
+    def train(self):
+        self.model.train()
+        self.multiperioddisc.train()
+        self.multiresddisc.train()
+
 
 def create_state(model, multiperioddisc, multiresddisc, opt_disc, opt_gen,
                  opt_d_scheduler, opt_g_scheduler):
@@ -393,6 +398,8 @@ def main():
     mel_loss_fn = MelSpecReconstructionLoss().to(device)
     if dist.is_initialized():
         dist.barrier()
+
+    train_state.train()
     for i, batch in enumerate(train_iter):
         metric = train_step(batch, train_state, config, mel_loss_fn, device)
         # write to tensorboard
