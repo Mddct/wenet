@@ -416,6 +416,7 @@ def main():
         # save interval
         if rank == 0 and i % 2000 == 0:
             save_checkpoint(args.model_dir, train_state)
+        train_state.global_step += 1
 
 
 if __name__ == '__main__':
