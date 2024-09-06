@@ -247,6 +247,8 @@ def train_step(batch,
             metrics["generator/feature_matching_mp"] = loss_fm_mp
             metrics["generator/feature_matching_mrd"] = loss_fm_mrd
 
+        metrics['generator/lr'] = state.optimizer_g.param_groups[0]['lr']
+        metrics['discriminator/lr'] = state.optimizer_d.param_groups[0]['lr']
     return metrics
 
 
