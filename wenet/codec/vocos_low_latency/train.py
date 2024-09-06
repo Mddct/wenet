@@ -203,6 +203,7 @@ def train_step(batch, state: TrainState, train_config: TrainConfig,
             metrics["discriminator/multi_period_loss"] = loss_mp
             metrics["discriminator/multi_res_loss"] = loss_mrd
             loss.backward()
+            state.optimizer_d.step()
             state.optimizer_d.zero_grad()
             state.scheduler_d.step()
 
@@ -238,6 +239,7 @@ def train_step(batch, state: TrainState, train_config: TrainConfig,
                     loss_fm_mp + train_config.mrd_loss_coeff * loss_fm_mrd +
                     train_config.mel_loss_coeff * mel_loss)
             loss.backward()
+            state.optimizer_g.step()
             state.optimizer_g.zero_grad()
             state.scheduler_g.step()
 
@@ -394,7 +396,6 @@ def main():
 
     # TODO: restore_ckpt(args)
 
-    global_step = 0
     mel_loss_fn = MelSpecReconstructionLoss().to(device)
     if dist.is_initialized():
         dist.barrier()
