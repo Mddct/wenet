@@ -396,7 +396,11 @@ def main():
 
     # TODO: restore_ckpt(args)
 
-    mel_loss_fn = MelSpecReconstructionLoss().to(device)
+    # TODO: unify
+    mel_loss_fn = MelSpecReconstructionLoss(sample_rate=32000,
+                                            n_fft=2048,
+                                            hop_length=640,
+                                            n_mels=128).to(device)
     if dist.is_initialized():
         dist.barrier()
 
